@@ -1,0 +1,4 @@
+[submodule "alphafold"]
+	path = alphafold
+	url = git@github.com:bigict/alphafold.git
+	branch = main
