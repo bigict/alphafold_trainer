@@ -14,14 +14,16 @@
 
 """Utilities for training AlphaFold."""
 
+import os
+from multiprocessing import Queue
+import pickle
 from typing import *
+
 from absl import logging
 import numpy as np
-import pickle
+from jax.example_libraries import optimizers as jopt
 import jax.numpy as jnp
 import jax.random as jrand
-from jax.example_libraries import optimizers as jopt
-from multiprocessing import Queue
 
 from alphafold.common.residue_constants import restype_order_with_x
 from alphafold.data.mmcif_parsing import MmcifObject
@@ -47,11 +49,14 @@ def cif_to_fasta(mmcif_object: MmcifObject,
 
 def load_features(path: str) -> FeatureDict:
   assert path.endswith('.pkl'), f"only pickle features supported, {path} provided."
-  return pickle.load(open(path, 'rb'))
+  with open(path, 'rb') as f:
+    return pickle.load(f)
 
-def load_labels(cif_path: str, pdb_id: str, chain_id: str = 'A') -> FeatureDict:
+def load_labels(cif_dir: str, pdb_id: str, chain_id: str = 'A') -> FeatureDict:
+  cif_path = os.path.join(cif_dir, f'{pdb_id}.cif')
   # get cif string
-  cif_string = open(cif_path, 'r').read()
+  with open(cif_path, 'r') as f:
+    cif_string = f.read()
   # parse cif string
   mmcif_obj = parse_mmcif_string(
       file_id=pdb_id, mmcif_string=cif_string).mmcif_object
@@ -71,6 +76,9 @@ def load_labels(cif_path: str, pdb_id: str, chain_id: str = 'A') -> FeatureDict:
     'all_atom_mask':      all_atom_mask,        # [NR, 37]
     'resolution':         resolution            # [,]
   }
+
+def load_variants(var_path: str, pdb_id: str, chain_id: str = 'A') -> FeatureDict:
+  return {}
 
 ignored_keys = [
   'domain_name',

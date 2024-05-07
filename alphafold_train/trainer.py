@@ -35,7 +35,7 @@ from ml_collections import ConfigDict
 from typing import Optional
 
 # import major classes & functions
-from alphafold.model.modules import AlphaFold
+from alphafold_train.model.modules import AlphaFold
 from alphafold_train.data_system import cast_to_precision
 from alphafold_train.optimizer import Optimizer
 from alphafold_train.mixed_precision import normalize_precision, set_alphafold_policy

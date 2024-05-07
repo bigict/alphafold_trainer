@@ -57,7 +57,8 @@ train_config = ConfigDict({
         # batches. Generally has little impact on code efficiency.
         'max_queue_size': 16,
         # Random seed for initializing model parameters. Ignored when attempting to auto load ckpts.
-        'random_seed': 181129
+        'random_seed': 181129,
+        'is_missense': True
     },
     'model_config': {
         'data': {
@@ -76,6 +77,9 @@ train_config = ConfigDict({
             'heads': {
                 'predicted_aligned_error': {
                     'weight': 0.1,
+                },
+                'logit_diff': {
+                    'weight': 10.0,
                 },
             },
         },
@@ -99,19 +103,19 @@ train_config = ConfigDict({
     'data':{
         'train': {
             # Directory to store features (features.pkl files)
-            'features_dir': "./example_data/features",
+            'features_dir': './example_data/features',
             # Directory to store labels (.mmcif files)
-            'mmcif_dir': "./example_data/mmcif",
+            'mmcif_dir': './example_data/mmcif',
             # Json file that specifies sampling weights of each sample.
-            'sample_weights': "./example_data/sample_weights.json"
+            'sample_weights': './example_data/sample_weights.json',
         },
         'eval': {
             # Directory to store features (features.pkl files)
-            'features_dir': "./example_data/features",
+            'features_dir': './example_data/features',
             # Directory to store labels (.mmcif files)
-            'mmcif_dir': "./example_data/mmcif",
+            'mmcif_dir': './example_data/mmcif',
             # Json file that specifies sampling weights of each sample.
-            'sample_weights': "./example_data/sample_weights.json"
+            'sample_weights': './example_data/sample_weights.json'
         },
     },
 })

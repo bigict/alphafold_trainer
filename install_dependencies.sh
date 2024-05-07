@@ -21,6 +21,8 @@
 # dependencies of feature processing  #
 #######################################
 
+set -e
+
 # CUDA=12.2.2
 # JAX=0.4.26
 # CUDNN=89

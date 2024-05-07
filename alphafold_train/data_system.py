@@ -14,15 +14,16 @@
 
 """Data system used to load training datasets."""
 
-from absl import logging
+import os
 import glob
+import json
+from multiprocessing import Process, Queue
+
+from absl import logging
 import jax
 import jax.numpy as jnp
 import jax.random as jrand
-import json
-from multiprocessing import Process, Queue
 import numpy as np
-import os
 
 from alphafold.common.residue_constants import sequence_to_onehot
 from alphafold.model.features import FeatureDict
@@ -85,13 +86,16 @@ class DataSystem:
 
   def load(self, prot_name: str):
     raw_features = utils.load_features(
-        os.path.join(self.dc.features_dir, prot_name+'/features.pkl'))
+        os.path.join(self.dc.features_dir, prot_name, 'features.pkl'))
     prot_info = prot_name.split('_')    # assert naming styles are in `101m_A` or `101m_1_A`
     pdb_id, chain_id = prot_info[0], prot_info[-1]
     raw_labels = utils.load_labels(
-        cif_path=os.path.join(self.dc.mmcif_dir, pdb_id+'.cif'),
+        cif_dir=self.dc.mmcif_dir,
         pdb_id=pdb_id,
         chain_id=chain_id)
+    if hasattr(self.dc, 'variant_dir'):
+      raw_labels.update(self.load_variants(
+          self.dc.variant_dir, pdb_id=pdb_id, chain_id=chain_id))
     return raw_features, raw_labels
 
 
