@@ -15,6 +15,7 @@
 """Utilities for training AlphaFold."""
 
 import os
+import gzip
 from multiprocessing import Queue
 import pickle
 from typing import *
@@ -55,8 +56,12 @@ def load_features(path: str) -> FeatureDict:
 def load_labels(cif_dir: str, pdb_id: str, chain_id: str = 'A') -> FeatureDict:
   cif_path = os.path.join(cif_dir, f'{pdb_id}.cif')
   # get cif string
-  with open(cif_path, 'r') as f:
-    cif_string = f.read()
+  if os.path.exists(cif_path):
+    with open(cif_path, 'r') as f:
+      cif_string = f.read()
+  else:
+    with gzip.open(f'{cif_path}.gz', 'rt') as f:
+      cif_string = f.read()
   # parse cif string
   mmcif_obj = parse_mmcif_string(
       file_id=pdb_id, mmcif_string=cif_string).mmcif_object
