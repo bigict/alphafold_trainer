@@ -139,6 +139,7 @@ class Trainer:
     def _loss_fn(params, batch, rng):
       # TODO: user external RNG
       _, loss = self._apply_fn(params=params, batch=batch, rng=rng)
+      loss = sum(loss)
       seq_length_weight = jnp.sqrt(jnp.sum(batch['all_atom_mask'][0,:,0]))
       return loss * seq_length_weight
 

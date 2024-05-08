@@ -28,7 +28,7 @@ train_config = ConfigDict({
         # in `alphafold/model/config.py` and specify it here.
         'model_name': 'model_1_ptm',
         # Verbosity of logging messages.
-        'verbose': 'info',
+        'verbose': 'debug',
         # The number of processes/gpus per node
         'gpus_per_node': 1,
         # The format for autoloading the checkpoint, choose from 'pkl' and 
@@ -58,7 +58,6 @@ train_config = ConfigDict({
         'max_queue_size': 16,
         # Random seed for initializing model parameters. Ignored when attempting to auto load ckpts.
         'random_seed': 181129,
-        'is_missense': True
     },
     'model_config': {
         'data': {
@@ -77,9 +76,6 @@ train_config = ConfigDict({
             'heads': {
                 'predicted_aligned_error': {
                     'weight': 0.1,
-                },
-                'logit_diff': {
-                    'weight': 10.0,
                 },
             },
         },

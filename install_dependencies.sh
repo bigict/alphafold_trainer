@@ -23,13 +23,7 @@
 
 set -e
 
-# CUDA=12.2.2
-# JAX=0.4.26
-# CUDNN=89
-
-CUDA=11.8.0
-JAX=0.4.25
-CUDNN=86
+CUDA=12.2.2
 
 # install conda packages
 conda install -y -c nvidia cuda=${CUDA}
@@ -62,8 +56,7 @@ conda install -y -c conda-forge mpi4py mpi4jax openmpi
 # conda install -y -c nvidia cudnn==8.0.4
 pip install --upgrade pip \
     && pip install -r ./requirements.txt \
-    && pip install --upgrade jax==${JAX} jaxlib==${JAX}+cuda$(cut -f1 -d. <<< ${CUDA}).cudnn${CUDNN} -f \
-    https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    && pip install -U "jax[cuda$(cut -f1 -d. <<< ${CUDA})]"
 
 # download stereo_chemical_props.txt
 wget -c -P alphafold/alphafold/common \
