@@ -65,6 +65,7 @@ def train(train_config):
   gc = train_config.global_config
   model_config = get_model_config(gc.model_name)
   model_config.update(train_config.model_config)
+  logging.info(model_config)
 
   # construct datasets
   logging.info('constructing train data ...')
