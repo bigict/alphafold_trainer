@@ -61,12 +61,13 @@ train_config = ConfigDict({
     },
     'model_config': {
         'data': {
-            'eval': {
+            'eval': {  # Stage 1
                 'crop_size': 256,
                 'subsample_templates': True,
+                'max_msa_clusters': 128,
             },
         },
-        'model': {
+        'model': {  # Overide model_config here.
             'global_config': {
                 'use_remat': True,
             },
