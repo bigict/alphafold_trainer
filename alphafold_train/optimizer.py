@@ -14,13 +14,15 @@
 
 """Wrapped optimizer for training AlphaFold."""
 
+import os
+import pickle
+
 from absl import logging
 import jax
 import jax.numpy as jnp
 from jax.example_libraries import optimizers as opt
 from jax.tree_util import tree_map
-import os
-import pickle
+import jmp
 
 from alphafold_train import utils
 
@@ -67,6 +69,12 @@ class Optimizer:
     self.opt_init, \
     self.opt_update, \
     self.get_params = OPTIM_DICT[self.config.name](self.lr_schedule)
+
+    cls = getattr(jmp, f'{self.config.mp_scale_type}LossScale')
+    self.loss_scale = (
+        cls(self.config.mp_scale_value)
+        if cls is not jmp.NoOpLossScale
+        else cls())
 
   def init_state(self, params):
     opt_state = self.opt_init(params)

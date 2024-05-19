@@ -29,25 +29,10 @@ from alphafold.common.residue_constants import sequence_to_onehot
 from alphafold.model.features import FeatureDict
 from alphafold.model.features import np_example_to_features as process_features
 from alphafold_train import utils
-from alphafold_train.label_pipeline import process_labels
+from alphafold_train.data.pipeline import process_labels
 
 FEATNAME_DICT = set(['aatype', 'residue_index', 'seq_length', 'template_aatype', 'template_all_atom_masks', 'template_all_atom_positions', 'template_sum_probs', 'is_distillation', 'seq_mask', 'msa_mask', 'msa_row_mask', 'random_crop_to_size_seed', 'template_mask', 'template_pseudo_beta', 'template_pseudo_beta_mask', 'atom14_atom_exists', 'residx_atom14_to_atom37', 'residx_atom37_to_atom14', 'atom37_atom_exists', 'extra_msa', 'extra_msa_mask', 'extra_msa_row_mask', 'bert_mask', 'true_msa', 'extra_has_deletion', 'extra_deletion_value', 'msa_feat', 'target_feat'])
 
-def cast_to_precision(batch, precision):
-  # the input batch is asserted of precision fp32.
-  if precision == 'bf16':
-    dtype = jnp.bfloat16
-  elif precision == 'fp16':
-    dtype = jnp.float16
-  else:   # assert fp32 specified
-    return batch
-  for key in batch:
-    # skip int type
-    if batch[key].dtype in [np.int32, np.int64, jnp.int32, jnp.int64]:
-      continue
-    if 'feat' in key or 'mask' in key or key in FEATNAME_DICT:
-      batch[key] = jnp.asarray(batch[key], dtype=dtype)
-  return batch
 
 class DataSystem:
   def __init__(self,

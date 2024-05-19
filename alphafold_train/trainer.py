@@ -15,14 +15,9 @@
 """Container (Trainer) for training AlphaFold."""
 
 # major imports
-from absl import logging
-import haiku as hk
-import jax
-import jax.numpy as jnp
-import numpy as np
 import os
 import time
-
+from typing import Optional
 
 # following packages for mpi communication will be just-in-time imported if use_mpi is True
 # from mpi4py import MPI
@@ -30,15 +25,18 @@ import time
 # from jax.tree_util import tree_flatten, tree_unflatten
 
 # import type name specifications
-from alphafold.model.features import FeatureDict
+from absl import logging
+import haiku as hk
+import jax
+import jax.numpy as jnp
+import jmp
 from ml_collections import ConfigDict
-from typing import Optional
+import numpy as np
 
 # import major classes & functions
+from alphafold.model.features import FeatureDict
 from alphafold_train.model.modules import AlphaFold
-from alphafold_train.data_system import cast_to_precision
 from alphafold_train.optimizer import Optimizer
-from alphafold_train.mixed_precision import normalize_precision, set_alphafold_policy
 
 
 class Trainer:
@@ -54,8 +52,8 @@ class Trainer:
 
     self.gc = global_config
 
-    self.precision = normalize_precision(self.gc.precision)
-    set_alphafold_policy(self.precision)
+    self.mp_policy = jmp.get_policy(self.gc.mp_policy)
+    hk.mixed_precision.set_policy(self.__class__, self.mp_policy)
 
     def _forward_fn(batch):
       model = AlphaFold(model_config.model)
@@ -141,7 +139,7 @@ class Trainer:
       _, loss = self._apply_fn(params=params, batch=batch, rng=rng)
       loss = sum(loss)
       seq_length_weight = jnp.sqrt(jnp.sum(batch['all_atom_mask'][0,:,0]))
-      return loss * seq_length_weight
+      return self.optimizer.loss_scale.scale(loss) * seq_length_weight
 
     # define reduce_fn for mpi communication.
     if self.gc.use_mpi:
@@ -164,10 +162,22 @@ class Trainer:
     def _update_fn(step, opt_state, batch, rng):
       loss, grads = jax.value_and_grad(_loss_fn)(
           self.optimizer.get_params(opt_state), batch, rng)
+
+      # Grads are in "param_dtype" (likely F32) here. We cast them back to the
+      # compute dtype such that we do the all-reduce below in the compute precision
+      # (which is typically lower than the param precision).
+      grads = self.mp_policy.cast_to_compute(grads)
+      grads = self.optimizer.loss_scale.unscale(grads)
+
       grads = self.optimizer.clip_grads(grads)
       if self.gc.use_mpi:
         loss = _mpi_reduce_value(loss)
         grads = _mpi_reduce_tree(grads)
+
+      # We compute our optimizer update in the same precision as params, even when
+      # doing mixed precision training.
+      grads = self.mp_policy.cast_to_param(grads)
+
       opt_state = self.optimizer.opt_update(step, grads, opt_state)
       return opt_state, loss
 
@@ -236,7 +246,6 @@ class Trainer:
 
 
   def train_step(self, step, batch, rng, silent=True):
-    batch = cast_to_precision(batch, self.precision)
     loss = self.update(step, batch, rng)
     if not silent:
       if self.is_logging_step(step):
