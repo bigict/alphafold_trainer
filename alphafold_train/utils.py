@@ -16,7 +16,6 @@
 
 import os
 import gzip
-from multiprocessing import Queue
 import pickle
 from typing import *
 
@@ -26,64 +25,24 @@ from jax.example_libraries import optimizers as jopt
 import jax.numpy as jnp
 import jax.random as jrand
 
-from alphafold.common.residue_constants import restype_order_with_x
-from alphafold.data.mmcif_parsing import MmcifObject
-from alphafold.data.mmcif_parsing import parse as parse_mmcif_string
 from alphafold.data.pipeline import FeatureDict
-from alphafold.data.templates import _get_atom_positions as get_atom_positions
-from Bio.PDB import protein_letters_3to1
 
 INT_MAX = 0x7fffffff
 
-# macros for retrying getting queue items.
-MAX_TIMEOUT = 60
-MAX_FAILED = 5
+def exists(val: Any):
+  return val is not None
 
-def cif_to_fasta(mmcif_object: MmcifObject,
-                 chain_id: str) -> str:
-  residues = mmcif_object.seqres_to_structure[chain_id]
-  residue_names = [residues[t].name for t in range(len(residues))]
-  residue_letters = [protein_letters_3to1.get(n, 'X') for n in residue_names]
-  filter_out_triple_letters = lambda x: x if len(x) == 1 else 'X'
-  fasta_string = ''.join([filter_out_triple_letters(n) for n in residue_letters])
-  return fasta_string
+def default(val: Any, d: Any):
+  return val if exists(val) else d
 
-def load_features(path: str) -> FeatureDict:
-  assert path.endswith('.pkl'), f"only pickle features supported, {path} provided."
-  with open(path, 'rb') as f:
-    return pickle.load(f)
-
-def load_labels(cif_dir: str, pdb_id: str, chain_id: str = 'A') -> FeatureDict:
-  cif_path = os.path.join(cif_dir, f'{pdb_id}.cif')
-  # get cif string
-  if os.path.exists(cif_path):
-    with open(cif_path, 'r') as f:
-      cif_string = f.read()
+def get_file_contents(pathname: str):
+  if os.path.exists(pathname):
+    with open(pathname, "r") as f:
+      return f.read()
   else:
-    with gzip.open(f'{cif_path}.gz', 'rt') as f:
-      cif_string = f.read()
-  # parse cif string
-  mmcif_obj = parse_mmcif_string(
-      file_id=pdb_id, mmcif_string=cif_string).mmcif_object
-  # fetch useful labels
-  if mmcif_obj is not None:
-    all_atom_positions, all_atom_mask = get_atom_positions(
-        mmcif_obj, chain_id, max_ca_ca_distance=float('inf'))
-    # directly parses sequence from fasta. should be consistent to 'aatype' in input features (from .fasta or .pkl)
-    sequence = cif_to_fasta(mmcif_obj, chain_id)
-    aatype_idx = np.array(
-        [restype_order_with_x[rn] for rn in sequence])
-    resolution = np.array(
-        [mmcif_obj.header['resolution']])
-  return {
-    'aatype_index':       aatype_idx,           # [NR,]
-    'all_atom_positions': all_atom_positions,   # [NR, 37, 3]
-    'all_atom_mask':      all_atom_mask,        # [NR, 37]
-    'resolution':         resolution            # [,]
-  }
-
-def load_variants(var_path: str, pdb_id: str, chain_id: str = 'A') -> FeatureDict:
-  return {}
+    with gzip.open(f"{pathname}.gz", "rt") as f:
+      return f.read()
+  raise ValueError(f"{pathname} not exist.")
 
 ignored_keys = [
   'domain_name',
@@ -173,28 +132,14 @@ def split_np_random_seed(rng):
   rng, sub_rng = jrand.split(rng, 2)
   return rng, int(jrand.randint(sub_rng, [1], 0, INT_MAX).item(0))
 
-def get_queue_item(q: Queue):
-  # waiting time upperbound = MAX_FAILED * MAX_TIMEOUT
-  for t in range(MAX_FAILED):
-    try:
-      item = q.get(block=True, timeout=MAX_TIMEOUT)
-      logging.debug(f"get queue item succeeded. current qsize = {q.qsize()}.")
-      return item
-    except:
-      logging.warning(f"get queue item timeout after {MAX_TIMEOUT}s "
-                      f"({t + 1}/{MAX_FAILED}).")
-  # exit subprogram:
-  logging.error("get queue item failed for too many times. subprogram quit.")
-  return None
 
-
-def load_opt_state_from_pkl(pkl_path):
+def load_opt_state_from_pkl(pkl_path: str):
     params = pickle.load(open(pkl_path, "rb"))
     opt_state = jopt.pack_optimizer_state(params)
     return opt_state
 
 
-def load_params_from_npz(npz_path):
+def load_params_from_npz(npz_path: str):
     params = jnp.load(npz_path, allow_pickle=True)
     return params['arr_0'].flat[0]
 

@@ -19,40 +19,15 @@ import os
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 from alphafold_train.train_config import train_config
 
-use_mpi = train_config.global_config.use_mpi
-if use_mpi:
-  from mpi4py import MPI
-  mpi_comm = MPI.COMM_WORLD
-  mpi_rank = mpi_comm.Get_rank()
-  is_main_process = (mpi_rank == 0)
-  os.environ['CUDA_VISIBLE_DEVICES'] = str(mpi_rank % train_config.global_config.gpus_per_node)
-else:         # assume single gpu is used.
-  mpi_comm = None
-  mpi_rank = 0
-  is_main_process = True
 # external import
-import contextlib
 import multiprocessing as mp
 
 from absl import logging
 
 # internal import
 from alphafold.model.config import model_config as get_model_config
-from alphafold_train.data_system import DataSystem, GetBatchProcess
-from alphafold_train.utils import get_queue_item
+from alphafold_train.data_system import DataSystem, dataset_manager
 from alphafold_train.trainer import Trainer
-
-
-@contextlib.contextmanager
-def batch_proc_manager(*args, **kwargs):
-  proc_list = []
-  try:
-    yield proc_list
-  finally:
-    for proc in proc_list:
-      logging.info('terminate process %s ...', proc.name)
-      if proc.is_alive():
-        proc.terminate()
 
 
 def train(train_config):
@@ -77,32 +52,38 @@ def train(train_config):
     logging.warning('failed to load validation data. poor configurations may be provided.')
     eval_data = None
 
-  with batch_proc_manager() as batch_proc_list:
+  mpi_rank, mpi_cond = mp.Value('i', -1), mp.Condition()
+  with dataset_manager(random_seed=gc.random_seed,
+                       max_queue_size=gc.max_queue_size,
+                       mpi_cond=mpi_cond,             # pass rank to generate different batches among mpi.
+                       mpi_rank=mpi_rank) as mgr:
     # create batch processes
-    train_queue = mp.Queue(gc.max_queue_size)
-    train_batch_proc = GetBatchProcess(
-        queue=train_queue,
+    train_data_proc = mgr.create(
         data=train_data,
         num_batches=gc.end_step - gc.start_step + 1,  # add 1 for the initialization batch
-        is_training=True,
-        random_seed=gc.random_seed,
-        mpi_rank=mpi_rank)                            # pass rank to generate different batches among mpi.
-    batch_proc_list.append(train_batch_proc)
-    # train_batch_proc.start()
+        is_training=True)
 
     if eval_data is not None:
-      eval_queue = mp.Queue(gc.max_queue_size)
-      eval_batch_proc = GetBatchProcess(
-          queue=eval_queue,
+      eval_data_proc = mgr.create(
           data=eval_data,
           num_batches=(gc.end_step - gc.start_step) // gc.eval_freq + 1,
-          is_training=False,
-          random_seed=gc.random_seed,
-          mpi_rank=mpi_rank)                          # pass rank to generate different batches among mpi.
-      batch_proc_list.append(eval_batch_proc)
-      # eval_batch_proc.start()
-    for batch_proc in batch_proc_list:
-      batch_proc.start()
+          is_training=False)
+    mgr.start()
+
+    use_mpi = train_config.global_config.use_mpi
+    if use_mpi:
+      from mpi4py import MPI
+      mpi_comm = MPI.COMM_WORLD
+      mpi_size = mpi_comm.Get_size()
+      mpi_rank.value = mpi_comm.Get_rank()
+      is_main_process = (mpi_rank.value == 0)
+      os.environ['CUDA_VISIBLE_DEVICES'] = str(mpi_rank.value % train_config.global_config.gpus_per_node)
+    else:         # assume single gpu is used.
+      mpi_comm = None
+      mpi_rank.value = 0
+      is_main_process = True
+    with mpi_cond:
+      mpi_cond.notify_all()
 
     # define and initialize trainer
     trainer = Trainer(
@@ -111,16 +92,16 @@ def train(train_config):
         model_config=model_config,
         mpi_comm=mpi_comm)
     logging.info('initializing ...')
-    _, init_batch = get_queue_item(train_queue)    # do NOT use the returned rng to initialize trainer.
+    _, init_batch = next(train_data_proc)    # do NOT use the returned rng to initialize trainer.
     trainer.initialize(init_batch, load_format=gc.ckpt_format)
 
     # conduct training
     logging.info('training ...')
     for step in range(gc.start_step, gc.end_step):
-      update_rng, batch = get_queue_item(train_queue)
+      update_rng, batch = next(train_data_proc)
       trainer.train_step(step, batch, update_rng, silent=(not is_main_process))
       if eval_data is not None and trainer.is_eval_step(step):
-        eval_rng, batch = get_queue_item(eval_queue)
+        eval_rng, batch = next(eval_data_proc)
         trainer.eval_step(step, batch, eval_rng, silent=(not is_main_process))
     logging.info('finished training.')
 
@@ -139,9 +120,9 @@ if __name__ == '__main__':
     'INFO': logging.INFO,
     'DEBUG': logging.DEBUG
   }
-  if is_main_process:
-    logging.set_verbosity(LOG_VERBOSITY[train_config.global_config.verbose.upper()])
-  else:
-    logging.set_verbosity(logging.ERROR)
+  # if is_main_process:
+  logging.set_verbosity(LOG_VERBOSITY[train_config.global_config.verbose.upper()])
+  # else:
+  #   logging.set_verbosity(logging.ERROR)
   train(train_config)
 
