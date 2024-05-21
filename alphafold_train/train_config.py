@@ -26,7 +26,7 @@ train_config = ConfigDict({
         # Setting this config to 'alphafold' to reproduce AlphaFold, or 'demo' 
         # for fast demonstration. You can also customize your own model config 
         # in `alphafold/model/config.py` and specify it here.
-        'model_name': 'model_1_ptm',
+        'model_name': 'model_5_ptm',
         # Verbosity of logging messages.
         'verbose': 'debug',
         # The number of processes/gpus per node
@@ -52,7 +52,7 @@ train_config = ConfigDict({
         'load_dir': './out/ckpt',
         # Training precision, generally in ['fp32', 'bf16'].
         # Set for mixed precision training.
-        'precision': 'fp32',
+        'mp_policy': 'params=f32,compute=bf16,output=f32',
         # Max queue size. Specifies the queue size of the pre-processed
         # batches. Generally has little impact on code efficiency.
         'max_queue_size': 16,
@@ -96,6 +96,8 @@ train_config = ConfigDict({
         },
         # Global clip norm of gradients.
         'clip_norm': 1e-1,
+        'mp_scale_type': 'Static',
+        'mp_scale_value': 2**15,
     },
     'data':{
         'train': {
