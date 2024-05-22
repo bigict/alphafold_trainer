@@ -20,5 +20,5 @@ Train [AlphaFold](http://github.com/deepmind/alphafold) related models with easy
   * Run test.
   ```
   $ export PYTHONPATH=`pwd`/alphafold
-  $ python train.py
+  $ XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py
   ```

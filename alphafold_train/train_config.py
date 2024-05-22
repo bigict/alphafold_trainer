@@ -28,7 +28,7 @@ train_config = ConfigDict({
         # in `alphafold/model/config.py` and specify it here.
         'model_name': 'model_5_ptm',
         # Verbosity of logging messages.
-        'verbose': 'debug',
+        'verbose': 'info',
         # The number of processes/gpus per node
         'gpus_per_node': 1,
         # The format for autoloading the checkpoint, choose from 'pkl' and 
