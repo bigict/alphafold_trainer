@@ -15,23 +15,48 @@
 """Data system used to load training datasets."""
 
 import os
+import contextlib
+import functools
 import glob
 import json
-from multiprocessing import Process, Queue
+import multiprocessing as mp
+import pickle
+from typing import Union
 
 from absl import logging
 import jax
 import jax.numpy as jnp
 import jax.random as jrand
 import numpy as np
+from Bio.PDB import protein_letters_3to1
 
-from alphafold.common.residue_constants import sequence_to_onehot
+from alphafold.common import residue_constants as rc
+from alphafold.data import mmcif_parsing
+from alphafold.data.templates import _get_atom_positions as get_atom_positions
 from alphafold.model.features import FeatureDict
 from alphafold.model.features import np_example_to_features as process_features
 from alphafold_train import utils
 from alphafold_train.data.pipeline import process_labels
 
 FEATNAME_DICT = set(['aatype', 'residue_index', 'seq_length', 'template_aatype', 'template_all_atom_masks', 'template_all_atom_positions', 'template_sum_probs', 'is_distillation', 'seq_mask', 'msa_mask', 'msa_row_mask', 'random_crop_to_size_seed', 'template_mask', 'template_pseudo_beta', 'template_pseudo_beta_mask', 'atom14_atom_exists', 'residx_atom14_to_atom37', 'residx_atom37_to_atom14', 'atom37_atom_exists', 'extra_msa', 'extra_msa_mask', 'extra_msa_row_mask', 'bert_mask', 'true_msa', 'extra_has_deletion', 'extra_deletion_value', 'msa_feat', 'target_feat'])
+
+
+def _pid_split(prot_name):
+  # assert naming styles are in `101m_A` or `101m_1_A`
+  i, j = prot_name.find("_"), prot_name.rfind("_")
+  pid = prot_name[:i] if i != -1 else prot_name
+  chain = prot_name[j + 1:] if j != -1 else None
+  return pid, chain
+
+
+def cif_to_fasta(mmcif_object: mmcif_parsing.MmcifObject,
+                 chain_id: str) -> str:
+  residues = mmcif_object.seqres_to_structure[chain_id]
+  residue_names = [residues[t].name for t in range(len(residues))]
+  residue_letters = [protein_letters_3to1.get(n, 'X') for n in residue_names]
+  filter_out_triple_letters = lambda x: x if len(x) == 1 else 'X'
+  fasta_string = ''.join([filter_out_triple_letters(n) for n in residue_letters])
+  return fasta_string
 
 
 class DataSystem:
@@ -63,24 +88,48 @@ class DataSystem:
     # check that every protein has mmcif as labels.
     self.pdb_list = DataSystem.get_pdb_list_from_dir(self.dc.mmcif_dir)
     for prot_name in self.prot_keys:
-      pdb_id = prot_name.split('_')[0]
+      pdb_id, _ = _pid_split(prot_name)
       assert pdb_id in self.pdb_list, \
           "%s doesn't have the corresponding mmcif file in %s." % (prot_name, self.dc.mmcif_dir)
     logging.debug("checking for data completeness successful.")
 
 
   def load(self, prot_name: str):
-    raw_features = utils.load_features(
-        os.path.join(self.dc.features_dir, prot_name, 'features.pkl'))
-    prot_info = prot_name.split('_')    # assert naming styles are in `101m_A` or `101m_1_A`
-    pdb_id, chain_id = prot_info[0], prot_info[-1]
-    raw_labels = utils.load_labels(
-        cif_dir=self.dc.mmcif_dir,
-        pdb_id=pdb_id,
-        chain_id=chain_id)
-    if hasattr(self.dc, 'variant_dir'):
-      raw_labels.update(self.load_variants(
-          self.dc.variant_dir, pdb_id=pdb_id, chain_id=chain_id))
+    # load msa, template etc from features.pkl
+    features_path = os.path.join(self.dc.features_dir,
+                                 prot_name,
+                                 "features.pkl")
+    with open(features_path, "rb") as f:
+      raw_features = pickle.load(f)
+
+    # load labels from mmcif
+    pdb_id, chain_id = _pid_split(prot_name)
+    chain_id = utils.default(chain_id, "A")
+    mmcif_string = utils.get_file_contents(os.path.join(self.dc.mmcif_dir,
+                                                        f"{pdb_id}.cif"))
+    mmcif_obj = mmcif_parsing.parse(file_id=pdb_id,
+                                    mmcif_string=mmcif_string).mmcif_object
+    assert utils.exists(mmcif_obj), (prot_name,)
+    all_atom_positions, all_atom_mask = get_atom_positions(
+        mmcif_obj, chain_id, max_ca_ca_distance=float("inf"))
+    # directly parses sequence from fasta. should be consistent to 'aatype' in
+    # input features (from .fasta or .pkl)
+    sequence = cif_to_fasta(mmcif_obj, chain_id)
+    aatype_idx = np.array(
+        [rc.restype_order_with_x[rn] for rn in sequence])
+    resolution = np.array(
+        [mmcif_obj.header['resolution']])
+    
+    raw_labels = {
+      "aatype_index":       aatype_idx,           # [NR,]
+      "all_atom_positions": all_atom_positions,   # [NR, 37, 3]
+      "all_atom_mask":      all_atom_mask,        # [NR, 37]
+      "resolution":         resolution            # [,]
+    }
+    if hasattr(self.dc, "variant_dir"):
+      pass
+      # raw_labels.update(self.load_variants(
+      #     self.dc.variant_dir, pdb_id=pdb_id, chain_id=chain_id))
     return raw_features, raw_labels
 
 
@@ -194,7 +243,11 @@ class DataSystem:
     return pdb_list
 
 
-class GetBatchProcess(Process):
+# macros for retrying getting queue items.
+MAX_TIMEOUT = 60
+MAX_FAILED = 5
+
+class GetBatchProcess(mp.Process):
   """
   a multiprocessing worker to conduct data loading.
   remark: make sure no jax call is used before this worker starts,
@@ -203,31 +256,86 @@ class GetBatchProcess(Process):
   """
   def __init__(
       self,
-      queue: Queue,
       data: DataSystem,
       num_batches: int,           # number of batches to generate
       is_training: bool = True,   # if true, random recycling is used.
       random_seed: int = 0,
-      mpi_rank: int = 0):
-    Process.__init__(self)
-    self.queue = queue
+      max_queue_size: int = 8,
+      mpi_rank: Union[int, mp.Value] = 0,
+      mpi_cond: mp.Condition = None):
+    mp.Process.__init__(self)
+
+    self.queue = mp.Queue(max_queue_size)
     self.data = data
     self.num_batches = num_batches
     self.is_training = is_training
     self.random_seed = random_seed
     self.mpi_rank = mpi_rank
+    self.mpi_cond = mpi_cond
+
+  def __next__(self):
+    # waiting time upperbound = MAX_FAILED * MAX_TIMEOUT
+    for t in range(MAX_FAILED):
+      try:
+        item = self.queue.get(block=True, timeout=MAX_TIMEOUT)
+        logging.debug("get queue item succeeded. current qsize = %s.",
+                      self.queue.qsize())
+        return item
+      except:
+        logging.warning(f"get queue item timeout after {MAX_TIMEOUT}s "
+                        f"({t + 1}/{MAX_FAILED}).")
+    # exit subprogram:
+    logging.error("get queue item failed for too many times. subprogram quit.")
+    return (None, None)
 
   def run(self):
-    logging.info("get batch process [%s] started.", self.mpi_rank)
+    mpi_rank = self.mpi_rank
+    if self.mpi_cond:
+      with self.mpi_cond:
+        while mpi_rank.value == -1:
+          self.mpi_cond.wait()
+      mpi_rank = mpi_rank.value
+
+    logging.info("get batch process [%s] started.", mpi_rank)
     with jax.disable_jit():
       rng = jrand.PRNGKey(self.random_seed)
-      rng = jrand.fold_in(rng, self.mpi_rank)
+      rng = jrand.fold_in(rng, mpi_rank)
     batch_gen = self.data.batch_gen(rng)
     for step in range(self.num_batches):
       batch_rng, batch = next(batch_gen)
       if self.is_training:
         batch = self.data.random_recycling(step, batch)
       self.queue.put((batch_rng, batch))
-      logging.debug(f"write queue item {step}. current qsize = {self.queue.qsize()}.")
-    logging.info("get batch process [%s] finished.", self.mpi_rank)
+      logging.info(f"write queue item %s. current qsize = %s.",
+                   step, self.queue.qsize())
+    logging.info("get batch process [%s] finished.", mpi_rank)
     return
+
+class GetBatchProcessMgr():
+  def __init__(self, *args, **kwargs):
+    self.batch_process = functools.partial(GetBatchProcess, *args, **kwargs)
+    self.items = []
+
+  def create(self, *args, **kwargs):
+    proc = self.batch_process(*args, **kwargs)
+    self.items.append(proc)
+    return proc
+
+  def start(self):
+    for proc in self.items:
+      if not proc.is_alive():
+        proc.start()
+
+  def stop(self):
+    for proc in self.items:
+      logging.info('terminate process %s ...', proc.name)
+      if proc.is_alive():
+        proc.terminate()
+
+@contextlib.contextmanager
+def dataset_manager(*args, **kwargs):
+  proc_mgr = GetBatchProcessMgr(*args, **kwargs)
+  try:
+    yield proc_mgr
+  finally:
+    proc_mgr.stop()

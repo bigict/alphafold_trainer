@@ -15,16 +15,13 @@
 """Label Preprocessing pipeline for training AlphaFold."""
 
 import numpy as np
-import jax.numpy as jnp
+
 from alphafold.common import residue_constants
 from alphafold.model import quat_affine
 from alphafold.model import all_atom
 from alphafold.model.all_atom import atom37_to_frames
 from alphafold.model.all_atom import atom37_to_torsion_angles
-from alphafold.model.modules \
-    import pseudo_beta_fn as pseudo_beta_fn_jnp
-from alphafold.model.tf.data_transforms \
-    import pseudo_beta_fn as pseudo_beta_fn_tf
+from alphafold.model.modules import pseudo_beta_fn
 from alphafold.model.tf.input_pipeline import compose
 from alphafold.data.pipeline import FeatureDict
 
@@ -36,19 +33,19 @@ def check_input_completeness(prot):
   """"""
   required_keys = {
     # basic requirements:
-    "aatype_index",                 # [NR,]
+    "aatype_index",           # [NR,]
     "all_atom_positions",     # [NR, 37, 3]
     "all_atom_mask"           # [NR, 37]
   }
   for k in required_keys:
     assert k in prot.keys(), f"required key {k} unsatisfied."
   # assert the num_res are compatible:
-  assert prot['aatype_index'].shape[0] == prot['all_atom_positions'].shape[0], \
+  assert prot["aatype_index"].shape[0] == prot["all_atom_positions"].shape[0], \
       f"ziyao: incompatible shapes of num_res: " \
       f"{prot['aatype_index'].shape[0]} from aatype_index, " \
       f"{prot['all_atom_positions'].shape[0]} from all_atom_positions."
   # assert aatype_index is provided instead of one-hot features:
-  assert len(prot['aatype_index'].shape) == 1, \
+  assert len(prot["aatype_index"].shape) == 1, \
       f"ziyao: wrong aatype_index shape: {prot['aatype_index'].shape}." \
       f"make sure indices of residues instead of one-hot features are provided."
   return prot
@@ -110,8 +107,8 @@ def make_atom14_positions(prot):
 
   # Create the mapping for (residx, atom14) --> atom37, i.e. an array
   # with shape (num_res, 14) containing the atom37 indices for this protein.
-  residx_atom14_to_atom37 = restype_atom14_to_atom37[prot['aatype_index']]
-  residx_atom14_mask = restype_atom14_mask[prot['aatype_index']]
+  residx_atom14_to_atom37 = restype_atom14_to_atom37[prot["aatype_index"]]
+  residx_atom14_mask = restype_atom14_mask[prot["aatype_index"]]
 
   # Create a mask for known ground truth positions.
   residx_atom14_gt_mask = residx_atom14_mask * np.take_along_axis(
@@ -130,7 +127,7 @@ def make_atom14_positions(prot):
   prot["residx_atom14_to_atom37"] = residx_atom14_to_atom37
 
   # Create the gather indices for mapping back.
-  residx_atom37_to_atom14 = restype_atom37_to_atom14[prot['aatype_index']]
+  residx_atom37_to_atom14 = restype_atom37_to_atom14[prot["aatype_index"]]
   prot["residx_atom37_to_atom14"] = residx_atom37_to_atom14
 
   # Create the corresponding mask.
@@ -142,7 +139,7 @@ def make_atom14_positions(prot):
       atom_type = residue_constants.atom_order[atom_name]
       restype_atom37_mask[restype, atom_type] = 1
 
-  residx_atom37_mask = restype_atom37_mask[prot['aatype_index']]
+  residx_atom37_mask = restype_atom37_mask[prot["aatype_index"]]
   prot["atom37_atom_exists"] = residx_atom37_mask
 
   # As the atom naming is ambiguous for 7 of the 20 amino acids, provide
@@ -171,7 +168,7 @@ def make_atom14_positions(prot):
 
   # Pick the transformation matrices for the given residue sequence
   # shape (num_res, 14, 14).
-  renaming_transform = renaming_matrices[prot['aatype_index']]
+  renaming_transform = renaming_matrices[prot["aatype_index"]]
 
   # Apply it to the ground truth positions. shape (num_res, 14, 3).
   alternative_gt_positions = np.einsum("rac,rab->rbc",
@@ -203,40 +200,39 @@ def make_atom14_positions(prot):
 
   # From this create an ambiguous_mask for the given sequence.
   prot["atom14_atom_is_ambiguous"] = (
-      restype_atom14_is_ambiguous[prot['aatype_index']])
+      restype_atom14_is_ambiguous[prot["aatype_index"]])
 
   return prot
 
 
 def make_backbone_affine(prot):
   # ziyao: these functions assume jnp inputs.
-  n, ca, c = [residue_constants.atom_order[a] for a in ('N', 'CA', 'C')]
+  n, ca, c = [residue_constants.atom_order[a] for a in ("N", "CA", "C")]
   rot, trans = quat_affine.make_transform_from_reference(
-          n_xyz=prot['all_atom_positions'][:, n],
-          ca_xyz=prot['all_atom_positions'][:, ca],
-          c_xyz=prot['all_atom_positions'][:, c])
+          n_xyz=prot["all_atom_positions"][:, n],
+          ca_xyz=prot["all_atom_positions"][:, ca],
+          c_xyz=prot["all_atom_positions"][:, c])
   backbone_affine_tensor = quat_affine.QuatAffine(
           quaternion=quat_affine.rot_to_quat(rot, unstack_inputs=True),
           translation=trans,
           rotation=rot,
           unstack_inputs=True).to_tensor()
   backbone_affine_mask = (
-          prot['all_atom_mask'][..., n] *
-          prot['all_atom_mask'][..., ca] *
-          prot['all_atom_mask'][..., c])
-  prot['backbone_affine_tensor'] = backbone_affine_tensor
-  prot['backbone_affine_mask'] = backbone_affine_mask
+          prot["all_atom_mask"][..., n] *
+          prot["all_atom_mask"][..., ca] *
+          prot["all_atom_mask"][..., c])
+  prot["backbone_affine_tensor"] = backbone_affine_tensor
+  prot["backbone_affine_mask"] = backbone_affine_mask
   return prot
 
 
 def make_pseudo_beta(prot):
   # ziyao: this function assumes jnp inputs.
-  pseudo_beta_fn = pseudo_beta_fn_jnp
-  prot['pseudo_beta'], prot['pseudo_beta_mask'] = (
+  prot["pseudo_beta"], prot["pseudo_beta_mask"] = (
       pseudo_beta_fn(
-          prot['aatype_index'],   # ziyao: 'all_atom_aatype' was actually required. don't know the difference. test needed.
-          prot['all_atom_positions'],
-          prot['all_atom_mask']))
+          prot["aatype_index"],   # ziyao: "all_atom_aatype" was actually required. don"t know the difference. test needed.
+          prot["all_atom_positions"],
+          prot["all_atom_mask"]))
   return prot
 
 
@@ -244,35 +240,35 @@ def make_rigidgroups_data(prot):
   """
   ziyao: this function generates all rigid-groups-related keys including:
   [
-    'rigidgroups_gt_frames',
-    'rigidgroups_gt_exists',
-    'rigidgroups_group_exists',
-    'rigidgroups_group_is_ambiguous',
-    'rigidgroups_alt_gt_frames'
+    "rigidgroups_gt_frames",
+    "rigidgroups_gt_exists",
+    "rigidgroups_group_exists",
+    "rigidgroups_group_is_ambiguous",
+    "rigidgroups_alt_gt_frames"
   ]
   """
   # ziyao: this function assumes jnp inputs.
   rigidgroups = atom37_to_frames(
-      prot['aatype_index'],
-      prot['all_atom_positions'],
-      prot['all_atom_mask'])
+      prot["aatype_index"],
+      prot["all_atom_positions"],
+      prot["all_atom_mask"])
   prot.update(rigidgroups)
   return prot
 
 
 def make_torsion_angles(prot):
-  aatype_index = np.expand_dims(prot['aatype_index'], 0)
-  all_atom_positions = np.expand_dims(prot['all_atom_positions'], 0)
-  all_atom_mask = np.expand_dims(prot['all_atom_mask'], 0)
+  aatype_index = np.expand_dims(prot["aatype_index"], 0)
+  all_atom_positions = np.expand_dims(prot["all_atom_positions"], 0)
+  all_atom_mask = np.expand_dims(prot["all_atom_mask"], 0)
   torsion_angles_dict = atom37_to_torsion_angles(
       aatype=aatype_index,
       all_atom_pos=all_atom_positions,
       all_atom_mask=all_atom_mask,
       placeholder_for_undefined=True)
-  chi_angles_sin_cos = torsion_angles_dict['torsion_angles_sin_cos'][0, :, 3:, :]  # [B, NR, 7, 2] -> [NR, 4, 2]
-  chi_mask = torsion_angles_dict['torsion_angles_mask'][0, :, 3:]                  # [B, NR, 7]    -> [NR, 4]
-  prot['chi_angles'] = np.arcsin(chi_angles_sin_cos[..., 0])
-  prot['chi_mask'] = chi_mask
+  chi_angles_sin_cos = torsion_angles_dict["torsion_angles_sin_cos"][0, :, 3:, :]  # [B, NR, 7, 2] -> [NR, 4, 2]
+  chi_mask = torsion_angles_dict["torsion_angles_mask"][0, :, 3:]                  # [B, NR, 7]    -> [NR, 4]
+  prot["chi_angles"] = np.arcsin(chi_angles_sin_cos[..., 0])
+  prot["chi_mask"] = chi_mask
   return prot
 
 
@@ -329,8 +325,8 @@ map_fns = [
     make_torsion_angles,
     to_numpy,                   # ziyao: perhaps optional.
     remove_keys_in_features,
-    add_batch_dim             # ziyao: canceled. this is now done in process_features().
-                              # weijie: cannot be canceled, need an auxiliary dimension for computing loss.
+    add_batch_dim               # ziyao: canceled. this is now done in process_features().
+                                # weijie: cannot be canceled, need an auxiliary dimension for computing loss.
 ]
 
 
