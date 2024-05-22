@@ -18,23 +18,21 @@ import os
 import pickle
 
 from absl import logging
-import jax
 import jax.numpy as jnp
 from jax.example_libraries import optimizers as opt
-from jax.tree_util import tree_map
 import jmp
 
 from alphafold_train import utils
 
 OPTIM_DICT = {
-    'adam':     opt.adam,
-    'sgd':      opt.sgd,
-    'adagrad':  opt.adagrad,
-    'nesterov': opt.nesterov
+    "adam":     opt.adam,
+    "sgd":      opt.sgd,
+    "adagrad":  opt.adagrad,
+    "nesterov": opt.nesterov
 }
 
 LR_SCHEDULE_DICT = {
-    'exp': opt.exponential_decay
+    "exp": opt.exponential_decay
 }
 
 def linear_warm_up(peak_lr, num_steps):
@@ -56,12 +54,12 @@ class Optimizer:
     self.warm_up_schedule = linear_warm_up(
         peak_lr=peak_lr,
         num_steps=warm_up_steps)
-    
+
     self.decay_schedule = LR_SCHEDULE_DICT[self.config.decay.name](
         peak_lr,
         self.config.decay.decay_steps,
         self.config.decay.decay_rate)
-    
+
     self.lr_schedule = lambda i: \
         (i < warm_up_steps) * self.warm_up_schedule(i) + \
         (i >= warm_up_steps) * self.decay_schedule(i - warm_up_steps)
@@ -70,7 +68,7 @@ class Optimizer:
     self.opt_update, \
     self.get_params = OPTIM_DICT[self.config.name](self.lr_schedule)
 
-    cls = getattr(jmp, f'{self.config.mp_scale_type}LossScale')
+    cls = getattr(jmp, f"{self.config.mp_scale_type}LossScale")
     self.loss_scale = (
         cls(self.config.mp_scale_value)
         if cls is not jmp.NoOpLossScale
@@ -79,7 +77,7 @@ class Optimizer:
   def init_state(self, params):
     opt_state = self.opt_init(params)
     return opt_state
-  
+
   unpack_optimizer_state = opt.unpack_optimizer_state
 
   def clip_grads(self, grads):
@@ -87,28 +85,29 @@ class Optimizer:
 
   def save(self, opt_state, path: str):
     # create directory
-    dir = os.path.dirname(path)
-    logging.debug(f"saving optimizer state to {dir}...")
-    if not os.path.exists(dir):
-      logging.warning(f"directory {dir} unexisted. creating the directory ...")
-      os.makedirs(dir)
+    dirname = os.path.dirname(path)
+    logging.debug("saving optimizer state to %s...", dirname)
+    if not os.path.exists(dirname):
+      logging.warning("directory %s unexisted. creating the directory ...",
+                      dirname)
+      os.makedirs(dirname)
     # save opt_state
-    if path.endswith('.pkl'):
+    if path.endswith(".pkl"):
       params = opt.unpack_optimizer_state(opt_state)
-      pickle.dump(params, open(path, "wb"))
-    elif path.endswith('.npz'):
+      with open(path, "wb") as f:
+        pickle.dump(params, f)
+    elif path.endswith(".npz"):
       params = self.get_params(opt_state)
       jnp.savez(path, params)
     else:
       raise ValueError(f"unknown parameter format specified: `{path}`.")
-  
+
   def load(self, path: str):
-    if path.endswith('.pkl'):
+    if path.endswith(".pkl"):
       opt_state = utils.load_opt_state_from_pkl(path)
-    elif path.endswith('.npz'):
+    elif path.endswith(".npz"):
       params = utils.load_params_from_npz(path)
       opt_state = self.optimizer.init_state(params)
     else:
       raise ValueError(f"unknown type of params: {path}")
     return opt_state
-

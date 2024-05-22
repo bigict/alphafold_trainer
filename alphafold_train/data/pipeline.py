@@ -19,8 +19,6 @@ import numpy as np
 from alphafold.common import residue_constants
 from alphafold.model import quat_affine
 from alphafold.model import all_atom
-from alphafold.model.all_atom import atom37_to_frames
-from alphafold.model.all_atom import atom37_to_torsion_angles
 from alphafold.model.modules import pseudo_beta_fn
 from alphafold.model.tf.input_pipeline import compose
 from alphafold.data.pipeline import FeatureDict
@@ -248,7 +246,7 @@ def make_rigidgroups_data(prot):
   ]
   """
   # ziyao: this function assumes jnp inputs.
-  rigidgroups = atom37_to_frames(
+  rigidgroups = all_atom.atom37_to_frames(
       prot["aatype_index"],
       prot["all_atom_positions"],
       prot["all_atom_mask"])
@@ -260,7 +258,7 @@ def make_torsion_angles(prot):
   aatype_index = np.expand_dims(prot["aatype_index"], 0)
   all_atom_positions = np.expand_dims(prot["all_atom_positions"], 0)
   all_atom_mask = np.expand_dims(prot["all_atom_mask"], 0)
-  torsion_angles_dict = atom37_to_torsion_angles(
+  torsion_angles_dict = all_atom.atom37_to_torsion_angles(
       aatype=aatype_index,
       all_atom_pos=all_atom_positions,
       all_atom_mask=all_atom_mask,
@@ -331,13 +329,13 @@ map_fns = [
 
 
 def process_labels(prot: FeatureDict) -> FeatureDict:
-  from alphafold.model.tf.input_pipeline import process_tensors_from_config
-  from alphafold.model.tf.proteins_dataset import np_to_tensor_dict
+  # from alphafold.model.tf.input_pipeline import process_tensors_from_config
+  # from alphafold.model.tf.proteins_dataset import np_to_tensor_dict
   # ziyao: this function simulates & simplifies the imported function above.
   #        for batch compatibility, a possible solution may be:
-  #             1. change np.ndarray to tf.tensor (by adapting np_to_tensor_dict)
-  #             2. add them to input tensors of process_tensors_from_config
-  #             3. use process_tensors_from_config to make data copies.
+  #            1. change np.ndarray to tf.tensor (by adapting np_to_tensor_dict)
+  #            2. add them to input tensors of process_tensors_from_config
+  #            3. use process_tensors_from_config to make data copies.
   prot = compose(map_fns)(prot)
   return prot
 
