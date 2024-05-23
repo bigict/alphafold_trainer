@@ -170,6 +170,7 @@ class Trainer:
       # precision. (which is typically lower than the param precision).
       grads = self.mp_policy.cast_to_compute(grads)
       grads = self.optimizer.loss_scale.unscale(grads)
+      loss = self.optimizer.loss_scale.unscale(loss)
 
       grads = self.optimizer.clip_grads(grads)
       if self.gc.use_mpi:
@@ -186,6 +187,7 @@ class Trainer:
     # define eval_fn for validation.
     def _eval_fn(params, batch, rng):
       loss = _loss_fn(params, batch, rng)
+      loss = self.optimizer.loss_scale.unscale(loss)
       if self.gc.use_mpi:
         loss = _mpi_reduce_value(loss)
       return loss

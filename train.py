@@ -113,7 +113,7 @@ def main(argv):
       mpi_rank.value = mpi_comm.Get_rank()
       is_main_process = (mpi_rank.value == 0)
       os.environ["CUDA_VISIBLE_DEVICES"] = str(
-          mpi_rank.value % train_config.global_config.gpus_per_node)
+          mpi_rank.value % gc.gpus_per_node)
     else:  # assume single gpu is used.
       mpi_comm = None
       mpi_rank.value = 0
