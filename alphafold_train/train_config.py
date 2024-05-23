@@ -11,30 +11,31 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Configurations for training AlphaFold."""
 
 from ml_collections import ConfigDict
 
 
 train_config = ConfigDict({
-    'global_config':{
+    'global_config': {
         # whether you are using MPI communication for multi-gpu training.
         'use_mpi': False,
-        # This specifies a model config defined in `alphafold/model/config.py`. 
+        # This specifies a model config defined in `alphafold/model/config.py`.
         # 'model_1' to 'model_5' are the settings used in the AlphaFold paper.
-        # Setting this config to 'alphafold' to reproduce AlphaFold, or 'demo' 
-        # for fast demonstration. You can also customize your own model config 
+        # Setting this config to 'alphafold' to reproduce AlphaFold, or 'demo'
+        # for fast demonstration. You can also customize your own model config
         # in `alphafold/model/config.py` and specify it here.
         'model_name': 'model_5_ptm',
         # Verbosity of logging messages.
         'verbose': 'info',
         # The number of processes/gpus per node
         'gpus_per_node': 1,
-        # The format for autoloading the checkpoint, choose from 'pkl' and 
-        # 'npz'. Note that `pkl` format stores necessary variables of 
+        'from_pretrained': False,
+        'data_dir': './db',
+        # The format for autoloading the checkpoint, choose from 'pkl' and
+        # 'npz'. Note that `pkl` format stores necessary variables of
         # optimizers, yet `npz` saves only model parameters.
-        'ckpt_format': 'pkl',
+        'ckpt_format': 'npz',
         # Initial step. if > 0, the model will auto-load ckpts from `load_dir`.
         'start_step': 0,                # 0 by default
         # Max steps for training. Accumulated from 'start_step' instead of 0.
@@ -52,12 +53,32 @@ train_config = ConfigDict({
         'load_dir': './out/ckpt',
         # Training precision, generally in ['fp32', 'bf16'].
         # Set for mixed precision training.
-        'mp_policy': 'params=f32,compute=bf16,output=f32',
+        'mp_policy': 'params=f32,compute=f32,output=f32',
         # Max queue size. Specifies the queue size of the pre-processed
         # batches. Generally has little impact on code efficiency.
         'max_queue_size': 16,
-        # Random seed for initializing model parameters. Ignored when attempting to auto load ckpts.
+        # Random seed for initializing model parameters. Ignored when attempting
+        # to auto load ckpts.
         'random_seed': 181129,
+        'optimizer': {
+            # Optimizer class.
+            'name': 'adam',                 # in ['adam', 'sgd', ...]
+            # Learning rate. if warm up steps > 0, this specifies the peak
+            # learning rate.
+            'learning_rate': 1e-3,          # 1e-3 in af2
+            # The number of warm-up steps.
+            'warm_up_steps': 10,            # 1000 in af2
+            # Learning rate decay configs.
+            'decay': {
+                'name': 'exp',              # only 'exp' supported
+                'decay_rate': 0.95,         # 0.95 in af2
+                'decay_steps': 10           # 5000? in af2
+            },
+            # Global clip norm of gradients.
+            'clip_norm': 1e-1,
+            'mp_scale_type': 'Static',
+            'mp_scale_value': 2**15,
+        },
     },
     'model_config': {
         'data': {
@@ -71,9 +92,9 @@ train_config = ConfigDict({
             'global_config': {
                 'use_remat': True,
             },
-            # If updated into the ConfigDict, the model will be trained with an 
-            # additional predicted_aligned_error head that can produce predicted 
-            # TM-score (pTM) and predicted aligned errors. 
+            # If updated into the ConfigDict, the model will be trained with an
+            # additional predicted_aligned_error head that can produce predicted
+            # TM-score (pTM) and predicted aligned errors.
             'heads': {
                 'predicted_aligned_error': {
                     'weight': 0.1,
@@ -81,25 +102,7 @@ train_config = ConfigDict({
             },
         },
     },
-    'optimizer': {
-        # Optimizer class.
-        'name': 'adam',                 # in ['adam', 'sgd', ...]
-        # Learning rate. if warm up steps > 0, this specifies the peak learning rate. 
-        'learning_rate': 1e-3,          # 1e-3 in af2
-        # The number of warm-up steps.
-        'warm_up_steps': 10,            # 1000 in af2
-        # Learning rate decay configs.
-        'decay':{
-            'name': 'exp',              # only 'exp' supported
-            'decay_rate': 0.95,         # 0.95 in af2
-            'decay_steps': 10           # 5000? in af2
-        },
-        # Global clip norm of gradients.
-        'clip_norm': 1e-1,
-        'mp_scale_type': 'Static',
-        'mp_scale_value': 2**15,
-    },
-    'data':{
+    'data': {
         'train': {
             # Directory to store features (features.pkl files)
             'features_dir': './example_data/features',

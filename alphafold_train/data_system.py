@@ -20,7 +20,7 @@ import glob
 import json
 import multiprocessing as mp
 import pickle
-from typing import Union
+from typing import Optional, Union
 
 from absl import logging
 import jax
@@ -235,7 +235,7 @@ class DataSystem:
 
   def preprocess(
       self,
-      rng,
+      rng: jrand.PRNGKey,
       raw_features: FeatureDict,
       raw_labels: FeatureDict) -> FeatureDict:
     rng, crop_seed = utils.split_np_random_seed(rng)
@@ -253,7 +253,7 @@ class DataSystem:
     batch = {**processed_features, **processed_labels}
     return rng, batch
 
-  def sample(self, rng, batch_size=None):
+  def sample(self, rng: jrand.PRNGKey, batch_size: Optional[int] = None):
     """
     pick a (batch of) protein(s) randomly and generate rng(s) for processing.
     if batch_size is None, return a pair of result; otherwise return a list of
@@ -272,7 +272,7 @@ class DataSystem:
       rngs = list(jrand.split(rng, batch_size))
       return list(zip(rngs, prot_idxs))
 
-  def get_batch(self, prot_idx, rng):
+  def get_batch(self, prot_idx: int, rng: jrand.PRNGKey):
     prot_name = self.prot_keys[prot_idx % self.num_prot]
     logging.debug("loading protein #%06d: %s...", prot_idx, prot_name)
     raw_features, raw_labels = self.load(prot_name)
@@ -282,7 +282,7 @@ class DataSystem:
     rng, batch_rng = jrand.split(rng, 2)
     return rng, batch_rng, batch
 
-  def random_recycling(self, step, batch):
+  def random_recycling(self, step: int, batch: FeatureDict):
     """
     Generate the number of recycling iterations for a given step and add it to
     the batch. This method is specifically set here to make sure the result is
@@ -294,7 +294,7 @@ class DataSystem:
     batch["num_iter_recycling"] = num_iter_recycling
     return batch
 
-  def batch_gen(self, rng):
+  def batch_gen(self, rng: jrand.PRNGKey):
     with jax.disable_jit():
       while True:
         rng, prot_idx = self.sample(rng, None)
@@ -360,7 +360,7 @@ class GetBatchProcess(mp.Process):
     self.mpi_rank = mpi_rank
     self.mpi_cond = mpi_cond
 
-  def __next__(self):
+  def __next__(self) -> tuple[jrand.PRNGKey, FeatureDict]:
     # waiting time upperbound = MAX_FAILED * MAX_TIMEOUT
     for t in range(MAX_FAILED):
       try:
@@ -369,8 +369,8 @@ class GetBatchProcess(mp.Process):
                       self.queue.qsize())
         return item
       except:  # pylint: disable=bare-except
-        logging.warning("get queue item timeout after %ss (%s).", MAX_TIMEOUT,
-                        (t + 1) / MAX_FAILED)
+        logging.warning("get queue item timeout after %ss (%s/%s).", MAX_TIMEOUT,
+                        t + 1, MAX_FAILED)
     # exit subprogram:
     logging.error("get queue item failed for too many times. subprogram quit.")
     return (None, None)
@@ -404,7 +404,7 @@ class GetBatchProcessMgr():
     self.batch_process = functools.partial(GetBatchProcess, *args, **kwargs)
     self.items = []
 
-  def create(self, *args, **kwargs):
+  def create(self, *args, **kwargs) -> GetBatchProcess:
     proc = self.batch_process(*args, **kwargs)
     self.items.append(proc)
     return proc
@@ -422,7 +422,7 @@ class GetBatchProcessMgr():
 
 
 @contextlib.contextmanager
-def dataset_manager(*args, **kwargs):
+def dataset_manager(*args, **kwargs) -> GetBatchProcessMgr:
   proc_mgr = GetBatchProcessMgr(*args, **kwargs)
   try:
     yield proc_mgr
