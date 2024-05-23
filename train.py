@@ -123,7 +123,6 @@ def main(argv):
 
     # define and initialize trainer
     trainer = Trainer(global_config=gc,
-                      optim_config=train_config.optimizer,
                       model_config=model_config,
                       mpi_comm=mpi_comm)
     logging.info("initializing ...")

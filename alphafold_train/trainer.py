@@ -23,11 +23,13 @@ from absl import logging
 import haiku as hk
 import jax
 import jax.numpy as jnp
+import jax.random as jrand
 import jmp
 from ml_collections import ConfigDict
 import numpy as np
 
 # import major classes & functions
+from alphafold.model.data import get_model_haiku_params
 from alphafold.model.features import FeatureDict
 from alphafold_train.model.modules import AlphaFold
 from alphafold_train.optimizer import Optimizer
@@ -37,15 +39,12 @@ class Trainer:
   """
   main class to train the UniFold model.
   """
-  def __init__(
-      self,
-      global_config: ConfigDict,
-      optim_config: ConfigDict,
-      model_config: ConfigDict,
-      **kwargs):
+  def __init__(self,
+               global_config: ConfigDict,
+               model_config: ConfigDict,
+               **kwargs):
 
     self.gc = global_config
-    self.optim_config = optim_config
 
     # mixed precision setup
     self.mp_policy = jmp.get_policy(self.gc.mp_policy)
@@ -84,7 +83,7 @@ class Trainer:
 
     # path formatters of ckpts and loss curves
     self.auto_ckpt_name = (
-        lambda step, format: f"{self.gc.model_name}_{step:05d}.{format}")
+        lambda step, fmt: f"{self.gc.model_name}_{step:05d}.{fmt}")
     self.auto_curve_name = (
         lambda is_train: f"{self.gc.model_name}_{'train' if is_train else 'eval'}_curve.npy")  # pylint: disable=line-too-long
 
@@ -106,7 +105,7 @@ class Trainer:
                  random_seed: Optional[int] = None):
 
     # create optimizer instance
-    self.optimizer = Optimizer(self.optim_config)
+    self.optimizer = Optimizer(self.gc.optimizer)
 
     use_autoload = self.gc.start_step > 0
     if use_autoload:
@@ -115,19 +114,24 @@ class Trainer:
           "`start_step` > 0.")
       self.autoload(self.gc.start_step, load_format)
     else:
-      assert batch is not None, (
-          "must provide a batch and a random seed to initialize model from "
-          "scratch.")
+      if self.gc.from_pretrained:
+        logging.info("load pretrained model: %s ...", self.gc.model_name)
+        params = get_model_haiku_params(model_name=self.gc.model_name,
+                                        data_dir=self.gc.data_dir)
+      else:
+        assert batch is not None, (
+            "must provide a batch and a random seed to initialize model from "
+            "scratch.")
+        if random_seed is not None:
+          logging.warning(
+              "external random seed overrides the one in global config.")
+        else:
+          random_seed = self.gc.random_seed
+          rng = jax.random.PRNGKey(random_seed)  # all ranks initialized equally.
+        params = hk.data_structures.to_mutable_dict(
+            self._init_fn(batch=batch, rng=rng))
       if self.optim_state is not None:
         logging.warning("existed optimizer states are reinitialized.")
-      if random_seed is not None:
-        logging.warning(
-            "external random seed overrides the one in global config.")
-      else:
-        random_seed = self.gc.random_seed
-        rng = jax.random.PRNGKey(random_seed)  # all ranks initialized equally.
-      params = hk.data_structures.to_mutable_dict(
-          self._init_fn(batch=batch, rng=rng))
       self.optim_state = self.optimizer.init_state(params)
 
     # define loss_fn
@@ -195,7 +199,7 @@ class Trainer:
     # start ticking after initialization.
     self._tic = time.time()
 
-  def autosave(self, step):
+  def autosave(self, step: int):
     # save ckpt in both npz and pkl formats.
     save_path_npz = os.path.join(self.gc.save_dir,
                                  self.auto_ckpt_name(step + 1, "npz"))
@@ -212,10 +216,9 @@ class Trainer:
     np.save(eval_curve_path, np.asarray(self.eval_losses))
     logging.info("model autosaved at step %05d successfully.", step)
 
-  def autoload(self, step, fmt="pkl"):
+  def autoload(self, step: int, fmt: str = "pkl"):
     # load ckpt
-    load_path = os.path.join(self.gc.load_dir,
-                             self.auto_ckpt_name(step, fmt))
+    load_path = os.path.join(self.gc.load_dir, self.auto_ckpt_name(step, fmt))
     self.optimizer.load(load_path)
     # load loss curve
     train_curve_path = os.path.join(self.gc.save_dir,
@@ -235,23 +238,29 @@ class Trainer:
     self.eval_losses = load_loss_curve(eval_curve_path)
     logging.info("model autoloaded at step %05d successfully.", step)
 
-  def update(self, step, batch, rng):
+  def update(self,
+             step: int,
+             batch: FeatureDict,
+             rng: jrand.PRNGKey) -> jnp.ndarray:
     # wrapped update_fn for external calls.
     opt_state, loss = self._update_fn(step, self.optim_state, batch, rng)
     self.optim_state = opt_state
     return loss
 
-  def _logging(self, step, loss):
+  def _logging(self, step: int, loss: jnp.ndarray):
     # print and record training stats at the step.
     toc = time.time()
-    step_time = (toc - self._tic) / (
-        1 if step == 0 else self.gc.logging_freq)
+    step_time = (toc - self._tic) / (1 if step == 0 else self.gc.logging_freq)
     self.train_losses.append((step, loss, step_time))
     logging.info("step: %05d\ttrain_loss: %3.4f\tstep_time: %2fs", step, loss,
                  step_time)
     self._tic = time.time()
 
-  def train_step(self, step, batch, rng, silent=True):
+  def train_step(self,
+                 step: int,
+                 batch: FeatureDict,
+                 rng: jrand.PRNGKey,
+                 silent: bool = True):
     loss = self.update(step, batch, rng)
     if not silent:
       if self.is_logging_step(step):
@@ -259,7 +268,11 @@ class Trainer:
       if self.is_save_step(step):
         self.autosave(step)
 
-  def eval_step(self, step, batch, rng, silent=True):
+  def eval_step(self,
+                step: int,
+                batch: FeatureDict,
+                rng: jrand.PRNGKey,
+                silent: bool = True):
     # evaluation on the fly
     tmp_tic = time.time()
     loss = self._eval_fn(self.params, batch, rng)
