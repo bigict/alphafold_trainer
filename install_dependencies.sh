@@ -23,12 +23,13 @@
 
 set -e
 
-CUDA=12.2.2
+CUDA_DIR=${CUDA_DIR:-/usr/local/cuda}
+CUDA_VERSION=12.2.2
 
 # install conda packages
-conda install -y -c nvidia cuda=${CUDA}
-conda install -y -c conda-forge openmm=8.0.0 pdbfixer
-conda install -y -c bioconda hmmer hhsuite kalign2
+conda install -y -c nvidia/label/cuda-12.2.2 cuda cuda-toolkit cudnn
+#conda install -y -c conda-forge openmm=8.0.0 pdbfixer
+# conda install -y -c bioconda hmmer hhsuite kalign2
  
 # # update openmm
 # work_path=$(pwd)
@@ -42,21 +43,23 @@ conda install -y -c bioconda hmmer hhsuite kalign2
 # #######################################
 # 
 # install openmpi
-conda install -y -c conda-forge mpi4py mpi4jax openmpi
+conda install -y -c conda-forge mpi4py=3.1.4 openmpi=4.0.4
+pip install mpi4jax
 
-# wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.1.tar.gz
+# wget -c https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.1.tar.gz
 # gunzip -c openmpi-4.1.1.tar.gz | tar xf -
-# cd openmpi-4.1.1
-# ./configure --prefix=${HOME}/.local
-# make all install
-# cd ..
+# pushd openmpi-4.1.1
+# ./configure --prefix=${HOME}/.local --enable-mca-dso=btl-smcuda,rcache-rgpusm,rcache-gpusm,accelerator-cuda --with-cuda=${CUDA_DIR}
+# make -j 16 all install
+# popd
 
 
 # install conda and pip packages
-# conda install -y -c nvidia cudnn==8.0.4
 pip install --upgrade pip \
     && pip install -r ./requirements.txt \
-    && pip install -U "jax[cuda$(cut -f1 -d. <<< ${CUDA})]"
+    && pip install -U jax==0.4.26 jaxlib==0.4.26+cuda12.cudnn89 \
+      -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    
 
 # download stereo_chemical_props.txt
 wget -c -P alphafold/alphafold/common \

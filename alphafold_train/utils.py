@@ -45,7 +45,7 @@ def get_file_contents(pathname: str):
 
 def split_np_random_seed(rng: jrand.PRNGKey):
   rng, sub_rng = jrand.split(rng, 2)
-  return rng, int(jrand.randint(sub_rng, [1], 0, INT_MAX).item(0))
+  return rng, int(jrand.randint(sub_rng, [1], 0, INT_MAX)[0])
 
 
 def load_opt_state_from_pkl(pkl_path: str):

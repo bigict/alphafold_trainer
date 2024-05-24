@@ -22,3 +22,8 @@ Train [AlphaFold](http://github.com/deepmind/alphafold) related models with easy
   $ export PYTHONPATH=`pwd`/alphafold
   $ XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py
   ```
+  or run with multi-gpus
+  ```
+  $ export PYTHONPATH=`pwd`/alphafold
+  $ MPI4JAX_USE_CUDA_MPI=1 XLA_PYTHON_CLIENT_PREALLOCATE=false mpirun --mca opal_cuda_support 1 -n 1 python train.py
+  ```
