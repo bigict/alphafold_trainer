@@ -164,22 +164,23 @@ class Trainer:
     def _update_fn(step, opt_state, batch, rng):
       loss, grads = jax.value_and_grad(_loss_fn)(
           self.optimizer.get_params(opt_state), batch, rng)
+      loss, grads = map(self.optimizer.loss_scale.unscale, (loss, grads))
 
-      # Grads are in "param_dtype" (likely F32) here. We cast them back to the
-      # compute dtype such that we do the all-reduce below in the compute
-      # precision. (which is typically lower than the param precision).
-      grads = self.mp_policy.cast_to_compute(grads)
-      grads = self.optimizer.loss_scale.unscale(grads)
-      loss = self.optimizer.loss_scale.unscale(loss)
-
-      grads = self.optimizer.clip_grads(grads)
       if self.gc.use_mpi:
+        # Grads are in "param_dtype" (likely F32) here. We cast them back to the
+        # compute dtype such that we do the all-reduce below in the compute
+        # precision. (which is typically lower than the param precision).
+        loss, grads = map(self.mp_policy.cast_to_compute, (loss, grads))
+
         loss = _mpi_reduce_value(loss)
         grads = _mpi_reduce_tree(grads)
 
-      # We compute our optimizer update in the same precision as params, even
-      # when doing mixed precision training.
-      grads = self.mp_policy.cast_to_param(grads)
+        # We compute our optimizer update in the same precision as params, even
+        # when doing mixed precision training.
+        loss = self.mp_policy.cast_to_output(loss)
+        grads = self.mp_policy.cast_to_param(grads)
+
+      grads = self.optimizer.clip_grads(grads)
 
       opt_state = self.optimizer.opt_update(step, grads, opt_state)
       return opt_state, loss
@@ -189,7 +190,9 @@ class Trainer:
       loss = _loss_fn(params, batch, rng)
       loss = self.optimizer.loss_scale.unscale(loss)
       if self.gc.use_mpi:
+        loss = self.mp_policy.cast_to_compute(loss)
         loss = _mpi_reduce_value(loss)
+        loss = self.mp_policy.cast_to_output(loss)
       return loss
 
     # do NOT re-jit as loss_fn is much of a wrapped apply_fn.
