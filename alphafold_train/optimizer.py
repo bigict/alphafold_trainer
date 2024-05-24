@@ -22,7 +22,6 @@ import jax.numpy as jnp
 from jax.example_libraries import optimizers as opt
 import jmp
 
-from alphafold_train import utils
 
 OPTIM_DICT = {
     "adam":     opt.adam,
@@ -37,6 +36,26 @@ LR_SCHEDULE_DICT = {
 
 def linear_warm_up(peak_lr, num_steps):
   return lambda i: (i + 1) / num_steps * peak_lr
+
+def load_opt_state_from_pkl(pkl_path: str):
+  with open(pkl_path, "rb") as f:
+    params = pickle.load(f)
+  opt_state = opt.pack_optimizer_state(params)
+  return opt_state
+
+def load_params_from_npz(npz_path: str):
+  params = jnp.load(npz_path, allow_pickle=True)
+  return params["arr_0"].flat[0]
+
+def load_params(model_path: str):
+  if model_path.endswith(".pkl"):
+    opt_state = load_opt_state_from_pkl(model_path)
+    params = opt.unpack_optimizer_state(opt_state)
+  elif model_path.endswith(".npz"):
+    params = load_params_from_npz(model_path)
+  else:
+    raise ValueError(f"unknown type of params: {model_path}")
+  return params
 
 class Optimizer:
   """
@@ -78,8 +97,6 @@ class Optimizer:
     opt_state = self.opt_init(params)
     return opt_state
 
-  unpack_optimizer_state = opt.unpack_optimizer_state
-
   def clip_grads(self, grads):
     return opt.clip_grads(grads, self.config.clip_norm)
 
@@ -104,9 +121,9 @@ class Optimizer:
 
   def load(self, path: str):
     if path.endswith(".pkl"):
-      opt_state = utils.load_opt_state_from_pkl(path)
+      opt_state = load_opt_state_from_pkl(path)
     elif path.endswith(".npz"):
-      params = utils.load_params_from_npz(path)
+      params = load_params_from_npz(path)
       opt_state = self.optimizer.init_state(params)
     else:
       raise ValueError(f"unknown type of params: {path}")

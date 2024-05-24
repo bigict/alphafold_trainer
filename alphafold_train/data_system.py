@@ -34,7 +34,11 @@ from alphafold.data.templates import _get_atom_positions as get_atom_positions
 from alphafold.model.features import FeatureDict
 from alphafold.model.features import np_example_to_features as process_features
 from alphafold_train import utils
-from alphafold_train.data.pipeline import process_labels
+from alphafold_train.data import pipeline, pipeline_multimer
+
+
+INT_MAX = 0x7fffffff
+
 
 FEATNAME_DICT = set([
     "aatype", "residue_index", "seq_length", "template_aatype",
@@ -65,6 +69,11 @@ def cif_to_fasta(mmcif_object: mmcif_parsing.MmcifObject, chain_id: str) -> str:
   fasta_string = "".join(
       [filter_out_triple_letters(n) for n in residue_letters])
   return fasta_string
+
+
+def split_np_random_seed(rng: jrand.PRNGKey):
+  rng, sub_rng = jrand.split(rng, 2)
+  return rng, int(jrand.randint(sub_rng, [1], 0, INT_MAX)[0])
 
 
 ignored_keys = [
@@ -246,12 +255,18 @@ class DataSystem:
                                             crop_size=self.crop_size,
                                             pad_for_shorter_seq=True,
                                             random_seed=crop_seed)
-    rng, feat_seed = utils.split_np_random_seed(rng)
-    processed_features = process_features(raw_features,
-                                          config=self.mc,
-                                          random_seed=feat_seed)
-    with jax.disable_jit():  # using jit here is experimentally slower
-      processed_labels = process_labels(raw_labels)
+    if self.mc.model.global_config.multimer_mode:
+      # batch = {**raw_features, **raw_labels}
+      processed_features = raw_features
+      with jax.disable_jit():  # using jit here is experimentally slower
+        processed_labels = pipeline_multimer.process_labels(raw_labels)
+    else:
+      rng, feat_seed = utils.split_np_random_seed(rng)
+      processed_features = process_features(raw_features,
+                                            config=self.mc,
+                                            random_seed=feat_seed)
+      with jax.disable_jit():  # using jit here is experimentally slower
+        processed_labels = pipeline.process_labels(raw_labels)
     batch = {**processed_features, **processed_labels}
     return rng, batch
 

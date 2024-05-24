@@ -31,7 +31,8 @@ import numpy as np
 # import major classes & functions
 from alphafold.model.data import get_model_haiku_params
 from alphafold.model.features import FeatureDict
-from alphafold_train.model.modules import AlphaFold
+from alphafold_train.model import modules
+from alphafold_train.model import modules_multimer
 from alphafold_train.optimizer import Optimizer
 
 
@@ -50,12 +51,20 @@ class Trainer:
     self.mp_policy = jmp.get_policy(self.gc.mp_policy)
     hk.mixed_precision.set_policy(self.__class__, self.mp_policy)
 
-    def _forward_fn(batch):
-      model = AlphaFold(model_config.model)
-      return model(batch,
-                   is_training=True,
-                   compute_loss=True,
-                   ensemble_representations=False)
+    if model_config.model.global_config.multimer_mode:
+      def _forward_fn(batch):
+        model = modules_multimer.AlphaFold(model_config.model)
+        return model(batch,
+                     is_training=True,
+                     compute_loss=True,
+                     ensemble_representations=False)
+    else:
+      def _forward_fn(batch):
+        model = modules.AlphaFold(model_config.model)
+        return model(batch,
+                     is_training=True,
+                     compute_loss=True,
+                     ensemble_representations=False)
 
     self._init_fn = jax.jit(hk.transform(_forward_fn).init)
     self._apply_fn = jax.jit(hk.transform(_forward_fn).apply)

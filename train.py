@@ -35,6 +35,7 @@ LOG_VERBOSITY = {
   "INFO": logging.INFO,
   "DEBUG": logging.DEBUG
 }
+
 gc = train_config.global_config
 
 flags.DEFINE_boolean("use_mpi", gc.use_mpi, "Use MPI to train with multiple "

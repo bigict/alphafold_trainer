@@ -39,7 +39,7 @@ conda install -y -c nvidia/label/cuda-12.2.2 cuda cuda-toolkit cudnn
 # cd $work_path
  
 # #######################################
-# # dependencies of training AlphaFold   #
+# # dependencies of training AlphaFold  #
 # #######################################
 # 
 # install openmpi
@@ -59,7 +59,7 @@ pip install --upgrade pip \
     && pip install -r ./requirements.txt \
     && pip install -U jax==0.4.26 jaxlib==0.4.26+cuda12.cudnn89 \
       -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-    
+
 
 # download stereo_chemical_props.txt
 wget -c -P alphafold/alphafold/common \
