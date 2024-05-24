@@ -48,8 +48,7 @@ flags.DEFINE_enum(
     "the monomer model with extra ensembling, monomer model with "
     "pTM head, or multimer model")
 flags.DEFINE_enum(
-    "verbose", gc.verbose.upper(), LOG_VERBOSITY.keys(), 
-    "Verbose")
+    "verbose", gc.verbose.upper(), LOG_VERBOSITY.keys(), "Verbose")
 
 FLAGS = flags.FLAGS
 
@@ -76,10 +75,10 @@ def main(argv):
 
   # construct datasets
   logging.info("constructing train data ...")
-  train_data = DataSystem(model_config, train_config.data.train)
+  train_data = DataSystem(gc, model_config, train_config.data.train)
   logging.info("constructing validation data ...")
   try:
-    eval_data = DataSystem(model_config, train_config.data.eval)
+    eval_data = DataSystem(gc, model_config, train_config.data.eval)
   except:  # pylint: disable=bare-except
     logging.warning(
         "failed to load validation data. poor configurations may be provided.")

@@ -126,8 +126,9 @@ class Trainer:
           logging.warning(
               "external random seed overrides the one in global config.")
         else:
+          # all ranks initialized equally.
           random_seed = self.gc.random_seed
-          rng = jax.random.PRNGKey(random_seed)  # all ranks initialized equally.
+          rng = jax.random.PRNGKey(random_seed)
         params = hk.data_structures.to_mutable_dict(
             self._init_fn(batch=batch, rng=rng))
       if self.optim_state is not None:

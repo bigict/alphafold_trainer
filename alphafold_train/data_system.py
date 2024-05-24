@@ -162,9 +162,11 @@ class DataSystem:
   """Analog to pytorch Dataset"""
   def __init__(
       self,
-      model_config,  # model config.
-      data_config):  # data config mainly including paths.
+      global_config,  # global config
+      model_config,   # model config.
+      data_config):   # data config mainly including paths.
     # copy config
+    self.gc = global_config
     self.mc = model_config
     self.dc = data_config
 
@@ -369,8 +371,8 @@ class GetBatchProcess(mp.Process):
                       self.queue.qsize())
         return item
       except:  # pylint: disable=bare-except
-        logging.warning("get queue item timeout after %ss (%s/%s).", MAX_TIMEOUT,
-                        t + 1, MAX_FAILED)
+        logging.warning("get queue item timeout after %ss (%s/%s).",
+                        MAX_TIMEOUT, t + 1, MAX_FAILED)
     # exit subprogram:
     logging.error("get queue item failed for too many times. subprogram quit.")
     return (None, None)
@@ -384,6 +386,8 @@ class GetBatchProcess(mp.Process):
       mpi_rank = mpi_rank.value
 
     logging.info("get batch process [%s] started.", mpi_rank)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(
+        mpi_rank % self.data.gc.gpus_per_node)
     with jax.disable_jit():
       rng = jrand.PRNGKey(self.random_seed)
       rng = jrand.fold_in(rng, mpi_rank)
